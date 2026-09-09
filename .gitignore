@@ -1,0 +1,73 @@
+# Python
+__pycache__/
+*.py[cod]
+*$py.class
+*.so
+.Python
+build/
+develop-eggs/
+dist/
+downloads/
+eggs/
+.eggs/
+lib/
+lib64/
+parts/
+sdist/
+var/
+wheels/
+*.egg-info/
+.installed.cfg
+*.egg
+
+# Virtual environments
+.env*
+venv/
+env/
+ENV/
+.venv/
+
+# IDE
+.vscode/
+.idea/
+*.swp
+*.swo
+*~
+
+# ComfyUI / AI Models
+/models/
+.lora_models/
+*.cache/
+.log
+.history.log
+logs/
+
+# LM Studio
+.cache/
+*.cache
+
+# Analytics & Data
+analytics/
+reference_sheets/
+lora_datasets/
+character_bibles/
+
+# Temporary files
+tmp/
+temp/
+*.tmp
+*.log
+
+# OS
+.DS_Store
+Thumbs.db
+
+# Buffer API keys (DO NOT COMMIT!)
+.env
+.env.example
+!.env.example
+
+# Generated assets
+output/
+generated_images/
+public_uploads/

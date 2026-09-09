@@ -1,0 +1,203 @@
+{
+    "version": 2,
+    "nodes": [
+        {
+            "id": 1,
+            "type": "CheckpointLoader",
+            "inputs": [],
+            "outputs": ["img"],
+            "params": {
+                "checkpoint_path": "/models/flux-1.5-002-base.pt",
+                "use_ema": true,
+                "load_infer": false
+            }
+        },
+        {
+            "id": 2,
+            "type": "InstantID",
+            "inputs": ["img"],
+            "outputs": ["img"],
+            "params": {
+                "instantid_path": "/models/InstantID_v0.5.pt",
+                "use_ema": true,
+                "anchor_id": 9
+            }
+        },
+        {
+            "id": 3,
+            "type": "KSampler",
+            "inputs": ["img"],
+            "outputs": ["img"],
+            "params": {
+                "num_steps": 25,
+                "step_size": 0.1,
+                "eta": 0.7,
+                "eta_min": 0.0,
+                "seed": 420691337,
+                "noise_schedule_type": "cosine",
+                "use_ema": true,
+                "dpm_solver": "euler"
+            }
+        },
+        {
+            "id": 4,
+            "type": "CFGScale",
+            "inputs": ["img"],
+            "outputs": ["img"],
+            "params": {
+                "scale": 7.5,
+                "use_ema": true,
+                "dpm_solver": "euler"
+            }
+        },
+        {
+            "id": 5,
+            "type": "PositiveTextEncode",
+            "inputs": ["text"],
+            "outputs": ["positive_prompt"],
+            "params": {
+                "checkpoint_path": "/models/flux-1.5-002-base.pt",
+                "use_ema": true,
+                "dpm_solver": "euler"
+            }
+        },
+        {
+            "id": 6,
+            "type": "PositiveTextEncode",
+            "inputs": ["text"],
+            "outputs": ["positive_prompt"],
+            "params": {
+                "checkpoint_path": "/models/flux-1.5-002-base.pt",
+                "use_ema": true,
+                "dpm_solver": "euler"
+            }
+        },
+        {
+            "id": 7,
+            "type": "NegativeTextEncode",
+            "inputs": ["text"],
+            "outputs": ["negative_prompt"],
+            "params": {
+                "checkpoint_path": "/models/flux-1.5-002-base.pt",
+                "use_ema": true,
+                "dpm_solver": "euler"
+            }
+        },
+        {
+            "id": 8,
+            "type": "ControlNetDepth",
+            "inputs": ["img"],
+            "outputs": [],
+            "params": {
+                "controlnet_path": "/models/ControlNet_depth.pt"
+            }
+        },
+        {
+            "id": 9,
+            "type": "ControlNetBones",
+            "inputs": ["img"],
+            "outputs": [],
+            "params": {
+                "controlnet_path": "/models/ControlNet_bones.pt"
+            }
+        },
+        {
+            "id": 10,
+            "type": "ControlNetLandmark",
+            "inputs": ["img"],
+            "outputs": [],
+            "params": {
+                "controlnet_path": "/models/ControlNet_landmarks.pt"
+            }
+        },
+        {
+            "id": 11,
+            "type": "ControlNetFaceAligner",
+            "inputs": ["image", "img"],
+            "outputs": ["img"],
+            "params": {
+                "controlnet_path": "/models/InstantID_controlnet.pt"
+            }
+        },
+        {
+            "id": 12,
+            "type": "SaveImage",
+            "inputs": ["img"],
+            "outputs": ["path"],
+            "params": {
+                "filename": "output.png",
+                "save_as_png": true,
+                "save_dir": "",
+                "quality": 95
+            }
+        },
+        {
+            "id": 13,
+            "type": "WebhookOutput",
+            "inputs": ["webhook_response"],
+            "outputs": [],
+            "params": {}
+        },
+        {
+            "id": 14,
+            "type": "LoadImage",
+            "inputs": [],
+            "outputs": ["image"],
+            "params": {
+                "path": "./agency/faces/aria_anchor.png"
+            }
+        },
+        {
+            "id": 15,
+            "type": "Text",
+            "inputs": ["text"],
+            "outputs": ["positive_prompt"],
+            "params": {}
+        },
+        {
+            "id": 16,
+            "type": "Text",
+            "inputs": [],
+            "outputs": ["image"],
+            "params": {
+                "path": ""
+            }
+        },
+        {
+            "id": 17,
+            "type": "Text",
+            "inputs": ["text"],
+            "outputs": ["negative_prompt"],
+            "params": {}
+        },
+        {
+            "id": 18,
+            "type": "Text",
+            "inputs": [],
+            "outputs": ["image"],
+            "params": {
+                "path": ""
+            }
+        }
+    ],
+    "edges": [
+        {"from": 1, "to": 2, "node_key": "img"},
+        {"from": 2, "to": 3, "node_key": "img"},
+        {"from": 3, "to": 4, "node_key": "img"},
+        {"from": 5, "to": 6, "node_key": "positive_prompt"},
+        {"from": 6, "to": 7, "node_key": "negative_prompt"},
+        {"from": 8, "to": 11, "node_key": ""},
+        {"from": 9, "to": 11, "node_key": ""},
+        {"from": 10, "to": 11, "node_key": ""},
+        {"from": 12, "to": 13, "node_key": ""},
+        {"from": 14, "to": 16, "node_key": ""},
+        {"from": 15, "to": 16, "node_key": "positive_prompt"},
+        {"from": 17, "to": 16, "node_key": "negative_prompt"}
+    ],
+    "variables": {
+        "text": "A high-end luxury lifestyle scene, 8k resolution, Scandinavian woman with sharp cheekbones and hazel eyes"
+    },
+    "inputs": {
+        "text": ""
+    }
+}

@@ -1,0 +1,47 @@
+{
+    "aria_vance": {
+        "name": "Aria_Vance",
+        "niche": "Luxury Travel & Lifestyle",
+        "personality_traits": ["elegant", "confident", "sophisticated"],
+        "appearance": {
+            "age_range": "24-28",
+            "gender": "female",
+            "ethnicity": "Scandinavian",
+            "body_type": "athletic",
+            "hair_color": "blonde",
+            "eye_color": "hazel"
+        },
+        "voice_tone": "elegant, articulate, confident",
+        "content_style": ["luxury lifestyle", "travel guides"]
+    },
+    "kai_cypher": {
+        "name": "Kai_Cypher",
+        "niche": "Tech & AI Gadgets",
+        "personality_traits": ["edgy", "innovative", "analytical"],
+        "appearance": {
+            "age_range": "26-30",
+            "gender": "male",
+            "ethnicity": "mixed",
+            "body_type": "athletic",
+            "hair_color": "black",
+            "eye_color": "brown"
+        },
+        "voice_tone": "energetic, tech-focused, forward-thinking",
+        "content_style": ["tech reviews", "AI demos"]
+    },
+    "lyra_quant": {
+        "name": "Lyra_Quant",
+        "niche": "Personal Finance & Web3",
+        "personality_traits": ["analytical", "professional", "knowledgeable"],
+        "appearance": {
+            "age_range": "28-32",
+            "gender": "female",
+            "ethnicity": "mixed",
+            "body_type": "lean",
+            "hair_color": "dark brown",
+            "eye_color": "brown"
+        },
+        "voice_tone": "professional, authoritative, confident",
+        "content_style": ["finance tips", "crypto insights"]
+    }
+}
