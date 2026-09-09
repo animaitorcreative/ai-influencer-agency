@@ -261,7 +261,7 @@ class CharacterCreator:
     
     def list_characters(self) -> List[str]:
         """List all available characters."""
-        bib_dir = os.path.join(self.bible_dir, "character_bibles")
+        bib_dir = self.bible_dir
         
         if not os.path.exists(bib_dir):
             return []

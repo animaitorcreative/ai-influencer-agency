@@ -101,6 +101,18 @@ def main():
         if run_btn:
             run_pipeline()
 
+
+def run_pipeline():
+    """Run the agency pipeline and surface failures in the dashboard."""
+    with st.spinner("Running the daily pipeline..."):
+        try:
+            agency_orchestrator.run_agency_pipeline()
+        except Exception as exc:
+            st.error(f"Pipeline failed: {exc}")
+            return
+    st.success("Daily pipeline completed.")
+
+
 # --- Character Creation Interface ---
 def start_character_creation():
     """Initialize character creation flow."""
@@ -123,7 +135,12 @@ def start_character_creation():
         button = st.button("Start Building", type="primary")
         
         if button:
-            character_creator.create_character(name, niche)
+            try:
+                bible = character_creator.character_creator.create_character(name, niche)
+                st.session_state["current_character_name"] = bible.name
+                st.success(f"Created character: {bible.name}")
+            except Exception as exc:
+                st.error(f"Character creation failed: {exc}")
 
 def character_creation_interface():
     """Interactive interface for building a character bible."""
@@ -183,7 +200,7 @@ def character_bible_viewer():
     st.subheader("📚 Character Bibles")
     
     # List all characters
-    character_ids = character_creator.list_characters()
+    character_ids = character_creator.character_creator.list_characters()
     
     if not character_ids:
         st.warning("No character bibles created yet. Click 'Create New Influencer' to get started!")
@@ -199,7 +216,7 @@ def character_bible_viewer():
 
 def display_character_bible(character_id: str):
     """Display a complete character bible with editing capabilities."""
-    bib = character_creator.get_character_bible(character_id)
+    bib = character_creator.character_creator.get_character_bible(character_id)
     
     if not bib:
         st.error(f"Character {character_id} not found")
