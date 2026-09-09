@@ -103,7 +103,7 @@ def main():
 
 
 def run_pipeline():
-    """Run the agency pipeline and surface failures in the dashboard."""
+    """Run the daily agency pipeline from the dashboard action."""
     with st.spinner("Running the daily pipeline..."):
         try:
             agency_orchestrator.run_agency_pipeline()
