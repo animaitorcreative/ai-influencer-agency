@@ -148,8 +148,11 @@ OUTPUT FORMAT (MUST BE STRICT JSON):
 class CharacterPromptEngine:
     """Advanced LLM prompt engine for character development."""
     
-    def __init__(self, LM_STUDIO_URL="http://192.168.10.105:1234/v1/chat/completions"):
-        self.LM_STUDIO_URL = LM_STUDIO_URL
+    def __init__(self, LM_STUDIO_URL=None):
+        self.LM_STUDIO_URL = LM_STUDIO_URL or os.getenv(
+            "LM_STUDIO_CHAT_URL",
+            "http://169.254.65.222:1234/v1/chat/completions",
+        )
         self.templates = PromptTemplate()
         
     def _query_llm(self, prompt: str) -> Dict:

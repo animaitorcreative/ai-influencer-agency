@@ -1,361 +1,219 @@
-"""
-🎨 Generate Master Reference Face Images for AI Influencer Agency
+"""Generate high-quality SFW anchor portraits with LM Studio and ComfyUI.
 
-This script creates high-resolution, front-facing portrait anchor images for each influencer.
-It connects to LM Studio (for detailed prompt generation) and ComfyUI (for image synthesis),
-then saves the results as master reference files for InstantID face consistency.
+Requirements:
+  - LM Studio serving an OpenAI-compatible API on http://169.254.65.222:1234/v1
+  - ComfyUI serving its API on http://127.0.0.1:8188
+  - An SDXL checkpoint installed in ComfyUI/models/checkpoints
 
-Run this after ensuring:
-  - LM Studio is running on port 1234 with your base model loaded
-  - ComfyUI is running on port 8188 with a Flux.1 or SDXL text-to-image API enabled
-
-Usage:
-  python generate_anchors.py
-
-Output:
-  ./agency/faces/{Character_Name}_anchor.png (for each of the 4 influencers)
+Environment variables:
+  LM_STUDIO_URL      default: http://169.254.65.222:1234/v1
+  COMFYUI_URL        default: http://127.0.0.1:8188
+  COMFY_CHECKPOINT   default: sd_xl_base_1.0.safetensors
+  ANCHOR_OUTPUT_DIR  default: ./agency/faces
 """
 
-import os
+from __future__ import annotations
+
 import json
+import os
+import random
 import time
 import uuid
-from datetime import datetime
-from typing import Dict, List, Optional
+from pathlib import Path
+from typing import Any
+
 import requests
-import websocket
 
 
-# ──────────────────────────────────────────────────────────────
-# CONFIGURATION
-# ──────────────────────────────────────────────────────────────
-
-LM_STUDIO_URL = "http://192.168.10.105:1234/v1"
-COMFYUI_URL = "http://127.0.0.1:8188"
-
-OUTPUT_DIR = "./agency/faces"
-os.makedirs(OUTPUT_DIR, exist_ok=True)
-
-
-# ──────────────────────────────────────────────────────────────
-# CHARACTER DEFINITIONS (basic descriptions → detailed prompts)
-# ──────────────────────────────────────────────────────────────
+LM_STUDIO_URL = os.getenv(
+    "LM_STUDIO_URL",
+    "http://169.254.65.222:1234/v1",
+).rstrip("/")
+COMFYUI_URL = os.getenv("COMFYUI_URL", "http://127.0.0.1:8188").rstrip("/")
+CHECKPOINT = os.getenv("COMFY_CHECKPOINT", "sd_xl_base_1.0.safetensors")
+OUTPUT_DIR = Path(os.getenv("ANCHOR_OUTPUT_DIR", "./agency/faces"))
+REQUEST_TIMEOUT = 30
+GENERATION_TIMEOUT = 900
 
 CHARACTER_SPECS = {
-    "Lumi_Thorne": {
-        "name": "Lumi_Thorne",
-        "description": "22-year-old brunette woman, warm hazel eyes, friendly smile, casual bedroom setting, relatable 'girl next door' aesthetic, highly realistic texture.",
-        "niche": "Premium Companion"
-    },
-    "Aria_Vance": {
-        "name": "Aria_Vance",
-        "description": "24-year-old Scandinavian woman, sharp cheekbones, piercing blue eyes, blonde hair tied back, neutral outdoor studio lighting, elegant and elite look.",
-        "niche": "Luxury Travel"
-    },
-    "Kai_Cypher": {
-        "name": "Kai_Cypher",
-        "description": "26-year-old athletic male, sharp jawline, short cropped dark hair, modern minimalist background, focused and intelligent expression.",
-        "niche": "Tech & AI Gadgets"
-    },
-    "Lyra_Quant": {
-        "name": "Lyra_Quant",
-        "description": "28-year-old professional East Asian woman, stylish thin-rimmed glasses, dark hair pulled back into a neat bun, bright corporate studio background, confident look.",
-        "niche": "Finance & Web3"
-    }
+    "Aura_Vex": (
+        "21-year-old digital-native woman, striking asymmetrical neon-violet eyes, "
+        "shifting pastel hair color, smooth skin with a subtle digital shimmer texture, "
+        "direct eye contact, modern studio ring-light reflection in the eyes"
+    ),
+    "Aria_Vance": (
+        "24-year-old Scandinavian woman, sharp cheekbones, piercing blue eyes, "
+        "blonde hair tied back, neutral outdoor studio lighting, elegant and elite look"
+    ),
+    "Kai_Cypher": (
+        "26-year-old athletic male, sharp jawline, short cropped dark hair, "
+        "modern minimalist background, focused and intelligent expression"
+    ),
+    "Lyra_Quant": (
+        "28-year-old professional East Asian woman, stylish thin-rimmed glasses, "
+        "dark hair pulled back into a neat bun, bright corporate studio background, confident look"
+    ),
 }
 
+NEGATIVE_PROMPT = (
+    "low quality, blurry, out of focus, illustration, cartoon, 3d render, CGI, "
+    "side profile, turned head, closed eyes, crossed eyes, distorted face, asymmetrical face, "
+    "extra fingers, bad hands, duplicate person, text, watermark, logo, harsh shadows"
+)
 
-# ──────────────────────────────────────────────────────────────
-# STEP 1: Query LM Studio for detailed image prompts
-# ──────────────────────────────────────────────────────────────
 
-def get_detailed_prompt(base_description: str, character_name: str) -> str:
-    """Send a basic character description to LM Studio and ask it to generate
-    a hyper-detailed, photorealistic ComfyUI-compatible image prompt. Focuses on high-detail skin texture, neutral eye-level angles, clean backgrounds."""
+def request_json(method: str, url: str, **kwargs: Any) -> dict[str, Any]:
+    response = requests.request(method, url, timeout=REQUEST_TIMEOUT, **kwargs)
+    response.raise_for_status()
+    return response.json()
 
-    system_prompt = (
-        "You are an expert AI image prompt engineer specializing in photorealistic character generation. "
-        "Your task is to create a highly detailed, professional image prompt optimized for Flux.1 / SDXL text-to-image pipelines. "
-        "The prompt should include: subject description, lighting setup, camera angle/pose, composition details, "
-        "texture quality keywords, aspect ratio, and technical rendering parameters. Keep it concise but thorough."
+
+def get_lm_model() -> str:
+    """Return the first model exposed by LM Studio."""
+    payload = request_json("GET", f"{LM_STUDIO_URL}/models")
+    models = payload.get("data", [])
+    if not models:
+        raise RuntimeError("LM Studio is running but has no loaded models.")
+    return models[0]["id"]
+
+
+def create_prompt(character_name: str, description: str, model: str) -> str:
+    """Ask LM Studio for a detailed, portrait-focused generation prompt."""
+    response = request_json(
+        "POST",
+        f"{LM_STUDIO_URL}/chat/completions",
+        json={
+            "model": model,
+            "temperature": 0.35,
+            "messages": [
+                {
+                    "role": "system",
+                    "content": (
+                        "You are a professional photorealistic SDXL prompt engineer. "
+                        "Return only one plain-text image prompt, with no markdown or commentary."
+                    ),
+                },
+                {
+                    "role": "user",
+                    "content": (
+                        f"Create a prompt for {character_name}: {description}. "
+                        "Make it a SFW high-resolution head-and-shoulders portrait, front-facing, "
+                        "eye-level camera, direct eye contact, neutral expression, clean studio "
+                        "background, soft even three-point lighting, realistic skin pores, natural "
+                        "facial symmetry, crisp eyes, catchlights, professional editorial photography, "
+                        "85mm portrait lens, shallow depth of field, centered composition."
+                    ),
+                },
+            ],
+        },
     )
+    try:
+        return response["choices"][0]["message"]["content"].strip().replace("```", "")
+    except (KeyError, IndexError, TypeError) as exc:
+        raise RuntimeError(f"Unexpected LM Studio response: {response}") from exc
 
-    user_prompt = (
-        f"Create a photorealistic image prompt for this influencer character:\n\n"
-        f"{base_description}\n\n"
-        f"Requirements:\n"
-        f"- Front-facing portrait, eye-level camera angle\n"
-        f"- Clean, neutral studio background that doesn't distract from the face\n"
-        f"- Soft, even lighting with no harsh shadows on the face\n"
-        f"- Photorealistic texture, skin details, eye reflections visible\n"
-        f"- 8K resolution quality, professional photography style\n"
-        f"- Output ONLY the image prompt text (no markdown, no extra commentary)"
-    )
 
-    headers = {"Content-Type": "application/json"}
-    data = {
-        "model": "local-model",
-        "messages": [
-            {"role": "system", "content": system_prompt},
-            {"role": "user", "content": user_prompt}
-        ],
-        "temperature": 0.3,  # Low temperature for consistent prompt output
+def build_workflow(prompt: str, seed: int) -> dict[str, dict[str, Any]]:
+    """Build a standard ComfyUI API-format SDXL workflow."""
+    return {
+        "1": {
+            "class_type": "CheckpointLoaderSimple",
+            "inputs": {"ckpt_name": CHECKPOINT},
+        },
+        "2": {
+            "class_type": "CLIPTextEncode",
+            "inputs": {"text": prompt, "clip": ["1", 1]},
+        },
+        "3": {
+            "class_type": "CLIPTextEncode",
+            "inputs": {"text": NEGATIVE_PROMPT, "clip": ["1", 1]},
+        },
+        "4": {
+            "class_type": "EmptyLatentImage",
+            "inputs": {"width": 1024, "height": 1024, "batch_size": 1},
+        },
+        "5": {
+            "class_type": "KSampler",
+            "inputs": {
+                "model": ["1", 0],
+                "positive": ["2", 0],
+                "negative": ["3", 0],
+                "latent_image": ["4", 0],
+                "seed": seed,
+                "steps": 30,
+                "cfg": 6.5,
+                "sampler_name": "dpmpp_2m",
+                "scheduler": "karras",
+                "denoise": 1.0,
+            },
+        },
+        "6": {
+            "class_type": "VAEDecode",
+            "inputs": {"samples": ["5", 0], "vae": ["1", 2]},
+        },
+        "7": {
+            "class_type": "SaveImage",
+            "inputs": {"filename_prefix": "anchor", "images": ["6", 0]},
+        },
     }
 
-    print(f"📝 Querying LM Studio for detailed prompt ({character_name})...")
-    response = requests.post(
-        f"{LM_STUDIO_URL}/chat/completions",
-        headers=headers,
-        json=data,
-        timeout=60
+
+def generate_image(workflow: dict[str, dict[str, Any]]) -> tuple[str, str, str]:
+    """Queue a workflow and return its prompt ID and saved image metadata."""
+    client_id = str(uuid.uuid4())
+    queued = request_json(
+        "POST",
+        f"{COMFYUI_URL}/prompt",
+        json={"prompt": workflow, "client_id": client_id},
     )
+    prompt_id = queued.get("prompt_id")
+    if not prompt_id:
+        raise RuntimeError(f"ComfyUI did not return a prompt ID: {queued}")
 
-    if response.status_code == 200:
-        raw_response = response.json()
+    deadline = time.monotonic() + GENERATION_TIMEOUT
+    while time.monotonic() < deadline:
+        history = request_json("GET", f"{COMFYUI_URL}/history/{prompt_id}")
+        item = history.get(prompt_id)
+        if item and item.get("status", {}).get("status_str") == "error":
+            raise RuntimeError(f"ComfyUI generation failed: {item['status']}")
+        if item and item.get("outputs"):
+            for output in item["outputs"].values():
+                images = output.get("images", [])
+                if images:
+                    image = images[0]
+                    return prompt_id, image["filename"], image.get("subfolder", "")
+        time.sleep(2)
 
-        # LM Studio API uses "choices" array with message objects
-        choices = raw_response.get("choices", [])
-        if len(choices) > 0 and isinstance(choices[0], dict):
-            raw_content = choices[0]["message"]["content"]
-        else:
-            # Fallback for other response formats
-            raw_content = raw_response.get("text", "")
-
-        print(f"  ✓ Response received: {raw_content[:50]}...")
-    else:
-        print(f"⚠️ LM Studio API returned status {response.status_code}: {response.text}")
-        # Fallback: use a pre-crafted detailed prompt
-        raw_content = f"{base_description}, front-facing portrait, eye-level camera angle, clean white studio background, soft even lighting, photorealistic texture, 8K resolution, professional photography, shallow depth of field focused on face"
-
-    # Clean up any markdown or formatting artifacts
-    if isinstance(raw_content, str):
-        prompt = raw_content.strip()
-        if "```" in prompt:
-            # Remove code block markers if present
-            prompt = prompt.replace("```", "").strip()
-        print(f"✓ Prompt generated for {character_name}")
-        return prompt
+    raise TimeoutError(f"ComfyUI did not finish prompt {prompt_id} within {GENERATION_TIMEOUT}s.")
 
 
-# ──────────────────────────────────────────────────────────────
-# STEP 2: Generate images via ComfyUI API
-# ──────────────────────────────────────────────────────────────
-
-def generate_image_via_comfyui(prompt_text: str, character_name: str, seed: int = None) -> str:
-    """Send a prompt to ComfyUI's web UI for generation and return the output path."""
-
-    if seed is None:
-        seed = int(time.time() * 1000) % 2**32
-
-    print(f"🎨 Generating {character_name} portrait (seed={seed})...")
-
-    # Load the base Flux.1 template (no InstantID needed for anchor generation)
-    with open("flux_instantid_template.json", "r") as f:
-        workflow = json.load(f)
-
-    # Adjust node inputs to use our generated prompt
-    # Node 6 is Positive Text Encode - inject the detailed prompt here
-    if "6" in workflow and "inputs" in workflow["6"]:
-        workflow["6"]["inputs"]["text"] = prompt_text
-
-    # Set random seed for KSampler (node 3)
-    if "3" in workflow:
-        workflow["3"]["params"]["seed"] = seed
-
-    # Remove the InstantID node since we don't need face consistency yet
-    # (we're creating master references, not using them yet)
-    nodes_to_remove = [i for i, n in enumerate(workflow["nodes"]) if n["type"] == "InstantID"]
-    workflow["nodes"].remove(workflow["nodes"][nodes_to_remove[0]])
-
-    # Re-index the nodes after removal
-    for i, node in enumerate(workflow["nodes"], start=1):
-        node["id"] = i
-
-    # Establish WebSocket connection to ComfyUI
-    ws = websocket.WebSocket()
-    ws.connect(f"ws://{COMFYUI_URL}/ws?clientId={uuid.uuid4()}")
-
-    # Send the workflow for generation
-    p = {"prompt": workflow}
-    data = json.dumps(p).encode('utf-8')
-    req = requests.post(f"{COMFYUI_URL}/prompt", data=data)
-    prompt_id = req.json()["prompt_id"]
-
-    print(f"  → ComfyUI request ID: {prompt_id}")
-
-    # Listen for completion via WebSocket
-    while True:
-        out = ws.recv()
-        if isinstance(out, str):
-            message = json.loads(out)
-            if message["type"] == "executing":
-                exec_data = message["data"]
-                if exec_data["node"] is None and exec_data["prompt_id"] == prompt_id:
-                    print(f"  ✓ Generation complete!")
-                    break
-
-    # Retrieve output filename from ComfyUI history
-    history_req = requests.get(f"{COMFYUI_URL}/history/{prompt_id}")
-    history = history_req.json()[prompt_id]
-
-    # Extract filename (from node 12's outputs)
-    if "12" in history and "images" in history["outputs"]:
-        filename = history["outputs"]["12"]["images"][0]["filename"]
-    else:
-        # Fallback: get first image from any output
-        for key, value in history["outputs"].items():
-            if isinstance(value, list) and len(value) > 0 and isinstance(value[0], dict):
-                filename = value[0].get("filename", f"{character_name}.png")
-                break
-
-    # Construct full path (ComfyUI typically saves to C:/comfyui/output/)
-    # Adjust if your ComfyUI output directory differs
-    output_dir = os.path.join(os.environ.get("COMFYUI_OUTPUT_DIR", "C:/comfyui/output"), filename)
-
-    print(f"  ✓ Image saved: {output_dir}")
-    return output_dir
+def download_image(filename: str, subfolder: str, destination: Path) -> None:
+    response = requests.get(
+        f"{COMFYUI_URL}/view",
+        params={"filename": filename, "subfolder": subfolder, "type": "output"},
+        timeout=REQUEST_TIMEOUT,
+    )
+    response.raise_for_status()
+    destination.write_bytes(response.content)
 
 
-# ──────────────────────────────────────────────────────────────
-# STEP 3: Download ComfyUI image and save locally
-# ──────────────────────────────────────────────────────────────
+def main() -> None:
+    OUTPUT_DIR.mkdir(parents=True, exist_ok=True)
+    request_json("GET", f"{COMFYUI_URL}/system_stats")
+    model = get_lm_model()
+    print(f"Using LM Studio model: {model}")
+    print(f"Using ComfyUI checkpoint: {CHECKPOINT}")
 
-def download_comfyui_image(prompt_id: str, filename: str) -> str:
-    """Download the generated image from ComfyUI's output folder."""
-
-    history_req = requests.get(f"{COMFYUI_URL}/history/{prompt_id}")
-    history = history_req.json()[prompt_id]
-
-    # Get the image URL from ComfyUI's file server
-    if "12" in history and "images" in history["outputs"]:
-        img_data = history["outputs"]["12"]["images"][0]
-        url = img_data.get("url", "")
-
-        print(f"  → Downloading image from: {url}")
-
-        # Download the actual image file
-        response = requests.get(url)
-        if response.status_code == 200:
-            save_path = os.path.join(OUTPUT_DIR, f"{filename}.png")
-            with open(save_path, 'wb') as f:
-                f.write(response.content)
-
-            # Verify the file exists and has reasonable size (>1KB)
-            if os.path.exists(save_path) and os.path.getsize(save_path) > 1024:
-                print(f"  ✓ Downloaded successfully: {os.path.basename(save_path)}")
-                return save_path
-            else:
-                raise Exception("Downloaded file is too small or invalid")
-        else:
-            raise Exception(f"Failed to download image (HTTP {response.status_code})")
-
-    # Fallback: assume file was saved locally by ComfyUI
-    return f"{COMFYUI_URL}/output/{filename}.png"
-
-
-# ──────────────────────────────────────────────────────────────
-# MAIN PIPELINE
-# ──────────────────────────────────────────────────────────────
-
-def run_generate_anchors():
-    """Run the complete anchor image generation pipeline."""
-
-    print("=" * 60)
-    print("🎨 AI Influencer Agency - Master Anchor Image Generator")
-    print("=" * 60)
-    print(f"Target: {OUTPUT_DIR}")
-    print(f"LM Studio: {LM_STUDIO_URL}")
-    print(f"ComfyUI:   {COMFYUI_URL}")
-    print()
-
-    all_results = []
-
-    for char_id, spec in CHARACTER_SPECS.items():
-        name = spec["name"]
-
-        # Step 1: Get detailed prompt from LM Studio
-        detailed_prompt = get_detailed_prompt(spec["description"], name)
-        print(f"  Prompt preview: {detailed_prompt[:80]}...")
-
-        # Step 2: Generate image via ComfyUI
-        try:
-            output_path = generate_image_via_comfyui(detailed_prompt, name)
-
-            # Step 3: Download and save locally
-            local_path = download_comfyui_image(42, f"{name}")  # Use a dummy prompt_id for this example
-
-            # Save with proper naming convention
-            final_filename = f"{name}_anchor.png"
-            final_path = os.path.join(OUTPUT_DIR, final_filename)
-
-            if local_path != final_path:
-                import shutil
-                shutil.copy2(local_path, final_path)
-
-            all_results.append({
-                "character": name,
-                "path": final_path,
-                "status": "success"
-            })
-            print(f"  ✅ {name}: {final_filename}")
-
-        except Exception as e:
-            error_msg = str(e)[:100]
-            all_results.append({
-                "character": name,
-                "path": None,
-                "status": f"failed: {error_msg}"
-            })
-            print(f"  ❌ {name}: {error_msg}")
-
-    # Summary
-    print("\n" + "=" * 60)
-    success_count = sum(1 for r in all_results if r["status"] == "success")
-    total_count = len(all_results)
-
-    print(f"\n📊 Summary: {success_count}/{total_count} characters generated successfully")
-
-    for result in all_results:
-        status_icon = "✅" if result["status"] == "success" else "❌"
-        path_info = f"{result['path']}" if result["path"] else "N/A"
-        print(f"  {status_icon} {result['character']} → {path_info}")
-
-    return all_results
-
-
-# ──────────────────────────────────────────────────────────────
-# VERIFICATION: Check that output files exist and are valid
-# ──────────────────────────────────────────────────────────────
-
-def verify_anchors():
-    """Verify that anchor images were created successfully."""
-
-    print("\n🔍 Verifying generated anchor images...")
-
-    expected = [f"{name}_anchor.png" for name in CHARACTER_SPECS.keys()]
-    results = []
-
-    for filename in expected:
-        filepath = os.path.join(OUTPUT_DIR, filename)
-        if os.path.exists(filepath):
-            size_kb = os.path.getsize(filepath) / 1024
-            print(f"  ✅ {filename} ({size_kb:.1f} KB)")
-            results.append({"name": filename, "status": "exists", "size_kb": size_kb})
-        else:
-            print(f"  ❌ {filename} (not found)")
-            results.append({"name": filename, "status": "missing"})
-
-    return results
+    for character_name, description in CHARACTER_SPECS.items():
+        print(f"\n[{character_name}] Creating detailed prompt...")
+        detailed_prompt = create_prompt(character_name, description, model)
+        seed = random.randint(0, 2**32 - 1)
+        print(f"[{character_name}] Queueing SDXL render with seed {seed}...")
+        _, filename, subfolder = generate_image(build_workflow(detailed_prompt, seed))
+        destination = OUTPUT_DIR / f"{character_name}_anchor.png"
+        download_image(filename, subfolder, destination)
+        print(f"[{character_name}] Saved {destination}")
 
 
 if __name__ == "__main__":
-    # Run the full pipeline
-    run_generate_anchors()
-
-    # Verify outputs
-    verify_anchors()
-
-    print("\n" + "=" * 60)
-    print("🎉 Anchor image generation complete!")
-    print(f"Check {OUTPUT_DIR} for your master reference face images.")
-    print("=" * 60)
+    main()

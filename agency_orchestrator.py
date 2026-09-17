@@ -8,7 +8,10 @@ import uuid
 from datetime import datetime
 
 # --- CONFIGURATION ---
-LM_STUDIO_URL = "http://192.168.10.105:1234/v1/chat/completions"
+LM_STUDIO_URL = os.getenv(
+    "LM_STUDIO_CHAT_URL",
+    "http://169.254.65.222:1234/v1/chat/completions",
+)
 COMFYUI_URL = "127.0.0.1:8188"
 BUFFER_API_URL = "https://bufferapp.com"
 BUFFER_ACCESS_TOKEN = os.getenv("BUFFER_ACCESS_TOKEN")
@@ -67,8 +70,16 @@ class MonetizationEngine:
 def generate_creative_brief(influencer_name, config):
     print(f"[{datetime.now()}] Querying LM Studio for {influencer_name}...")
     headers = {"Content-Type": "application/json"}
+    models_response = requests.get(
+        LM_STUDIO_URL.rsplit("/", 2)[0] + "/models",
+        timeout=5,
+    )
+    models_response.raise_for_status()
+    models = models_response.json().get("data", [])
+    if not models:
+        raise ConnectionError("LM Studio is reachable, but no model is loaded.")
     data = {
-        "model": "local-model",
+        "model": os.getenv("LM_STUDIO_MODEL", models[0]["id"]),
         "messages": [
             {"role": "system", "content": config["system_prompt"]},
             {"role": "user", "content": "Generate today's viral lifestyle image prompt and posting caption based on your persona."}
@@ -76,8 +87,9 @@ def generate_creative_brief(influencer_name, config):
         "temperature": 0.7,
         "response_format": {"type": "json_object"}
     }
-    response = requests.post(LM_STUDIO_URL, headers=headers, json=data)
-    raw_content = response.json()['choices']['message']['content']
+    response = requests.post(LM_STUDIO_URL, headers=headers, json=data, timeout=120)
+    response.raise_for_status()
+    raw_content = response.json()['choices'][0]['message']['content']
     return json.loads(raw_content)
 
 # --- STEP 2: TRIGGER COMFYUI API WITH INSTANTID & FIXED SEED ---

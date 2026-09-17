@@ -92,27 +92,44 @@ class CharacterBible:
 class CharacterCreator:
     """Interactive AI-powered character creator for building influencer personas."""
     
-    def __init__(self, LM_STUDIO_URL="http://localhost:1234/v1/chat/completions"):
-        self.LM_STUDIO_URL = LM_STUDIO_URL
+    def __init__(self, LM_STUDIO_URL=None):
+        self.LM_STUDIO_URL = LM_STUDIO_URL or os.getenv(
+            "LM_STUDIO_CHAT_URL",
+            "http://169.254.65.222:1234/v1/chat/completions",
+        )
         self.bible_dir = "./agency/character_bibles"
         
     def _query_llm(self, system_prompt: str, user_messages: List[Dict], 
                    temperature: float = 0.7) -> dict:
         """Query LM Studio API for character-related responses."""
         headers = {"Content-Type": "application/json"}
+        model_response = requests.get(
+            self.LM_STUDIO_URL.rsplit("/", 2)[0] + "/models",
+            timeout=5,
+        )
+        model_response.raise_for_status()
+        models = model_response.json().get("data", [])
+        if not models:
+            raise ConnectionError("LM Studio is reachable, but no model is loaded.")
+
         data = {
-            "model": "local-model",
+            "model": os.getenv("LM_STUDIO_MODEL", models[0]["id"]),
             "messages": [
                 {"role": "system", "content": system_prompt},
                 *user_messages,
-                {"role": "user", "content": user_messages[-1]["content"]}
             ],
             "temperature": temperature,
             "response_format": {"type": "json_object"}
         }
         
-        response = requests.post(self.LM_STUDIO_URL, headers=headers, json=data)
-        return response.json()['choices']['message']['content']
+        response = requests.post(
+            self.LM_STUDIO_URL,
+            headers=headers,
+            json=data,
+            timeout=120,
+        )
+        response.raise_for_status()
+        return response.json()["choices"][0]["message"]["content"]
     
     def create_character(self, name: str = None, niche: str = None):
         """Create a new character profile from scratch."""
@@ -266,7 +283,7 @@ class CharacterCreator:
         if not os.path.exists(bib_dir):
             return []
             
-        return [f for f in os.listdir(bib_dir) if f.endswith(".json")]
+        return [os.path.splitext(f)[0] for f in os.listdir(bib_dir) if f.endswith(".json")]
 
 # Global instance
 character_creator = CharacterCreator()
