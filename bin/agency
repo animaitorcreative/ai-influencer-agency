@@ -1,0 +1,71 @@
+#!/usr/bin/env bash
+set -Eeuo pipefail
+
+SCRIPT_PATH="$(readlink -f -- "${BASH_SOURCE[0]}")"
+PROJECT_DIR="$(cd -- "$(dirname -- "$SCRIPT_PATH")/.." && pwd)"
+VENV_PYTHON="${PROJECT_DIR}/.venv/bin/python"
+STREAMLIT="${PROJECT_DIR}/.venv/bin/streamlit"
+PORT="${AGENCY_PORT:-8502}"
+LM_URL="${LM_STUDIO_URL:-http://169.254.65.222:1234/v1}"
+COMFY_URL="${COMFYUI_URL:-http://127.0.0.1:8188}"
+LOG_FILE="${AGENCY_LOG_FILE:-/tmp/agency-dashboard.log}"
+
+say() {
+    printf '[agency] %s\n' "$*"
+}
+
+fail() {
+    printf '[agency] ERROR: %s\n' "$*" >&2
+    exit 1
+}
+
+check_http() {
+    curl --silent --show-error --fail --connect-timeout 2 --max-time 4 "$1" >/dev/null
+}
+
+open_browser() {
+    if command -v xdg-open >/dev/null 2>&1; then
+        xdg-open "http://localhost:${PORT}" >/dev/null 2>&1 &
+    fi
+}
+
+cd "$PROJECT_DIR"
+
+[[ -x "$VENV_PYTHON" ]] || fail "Missing project virtual environment: ${VENV_PYTHON}"
+[[ -x "$STREAMLIT" ]] || fail "Streamlit is not installed in the project virtual environment."
+[[ -f "${PROJECT_DIR}/dashboard.py" ]] || fail "dashboard.py was not found."
+command -v curl >/dev/null 2>&1 || fail "curl is required."
+
+if check_http "${LM_URL%/}/models"; then
+    say "LM Studio is reachable at ${LM_URL%/}."
+else
+    say "Warning: LM Studio is not reachable at ${LM_URL%/}; the dashboard will still start."
+fi
+
+if check_http "${COMFY_URL%/}/system_stats"; then
+    say "ComfyUI is reachable at ${COMFY_URL%/}."
+elif [[ -x "/home/durty/AI/tools/ComfyUI/venv/bin/python" && -f "/home/durty/AI/tools/ComfyUI/main.py" ]]; then
+    say "ComfyUI is offline; starting it in the background."
+    nohup /home/durty/AI/tools/ComfyUI/venv/bin/python \
+        /home/durty/AI/tools/ComfyUI/main.py \
+        --listen 0.0.0.0 --port 8188 \
+        >>/tmp/comfyui.log 2>&1 &
+else
+    say "Warning: ComfyUI is not reachable and its local installation was not found."
+fi
+
+if ss -ltn 2>/dev/null | grep -qE ":${PORT}[[:space:]]"; then
+    say "Dashboard is already running at http://localhost:${PORT}"
+    open_browser
+    exit 0
+fi
+
+say "Starting dashboard at http://localhost:${PORT}"
+export LM_STUDIO_URL="$LM_URL"
+export COMFYUI_URL="$COMFY_URL"
+open_browser
+exec "$STREAMLIT" run "${PROJECT_DIR}/dashboard.py" \
+    --server.port "$PORT" \
+    --server.headless true \
+    --browser.gatherUsageStats false \
+    >>"$LOG_FILE" 2>&1
