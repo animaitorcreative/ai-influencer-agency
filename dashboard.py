@@ -10,6 +10,7 @@ import json
 import os
 import requests
 import subprocess
+import shutil
 import time
 from datetime import datetime
 from typing import Dict, List
@@ -87,28 +88,37 @@ def start_local_service(service: str) -> tuple[bool, str]:
     """Start a local service using its configured installation."""
     try:
         if service == "comfyui":
-            command = [
-                "/home/durty/AI/tools/ComfyUI/venv/bin/python",
-                "/home/durty/AI/tools/ComfyUI/main.py",
-                "--listen",
-                "0.0.0.0",
-                "--port",
-                "8188",
-            ]
+            comfy_launcher = shutil.which("comfy")
+            if not comfy_launcher:
+                raise FileNotFoundError(
+                    "The 'comfy' launcher was not found on PATH."
+                )
+            command = [comfy_launcher]
+            working_directory = os.path.expanduser("~/")
         elif service == "lmstudio":
             command = ["lmstudio"]
+            working_directory = os.path.dirname(__file__)
         else:
             raise ValueError(f"Unknown service: {service}")
 
-        subprocess.Popen(
-            command,
-            cwd=os.path.dirname(__file__) if service == "lmstudio" else "/home/durty/AI/tools/ComfyUI",
-            stdout=subprocess.DEVNULL,
-            stderr=subprocess.DEVNULL,
-            start_new_session=True,
+        log_handle = (
+            open("/tmp/comfyui-dashboard.log", "a", encoding="utf-8")
+            if service == "comfyui"
+            else None
         )
-        return True, f"Starting {service}..."
-    except OSError as exc:
+        try:
+            subprocess.Popen(
+                command,
+                cwd=working_directory,
+                stdout=log_handle or subprocess.DEVNULL,
+                stderr=subprocess.STDOUT if log_handle else subprocess.DEVNULL,
+                start_new_session=True,
+            )
+        finally:
+            if log_handle:
+                log_handle.close()
+        return True, f"Starting {service} with {command[0]}..."
+    except (OSError, ValueError) as exc:
         return False, f"Could not start {service}: {exc}"
 
 
