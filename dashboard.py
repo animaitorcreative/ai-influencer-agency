@@ -20,6 +20,7 @@ from urllib.parse import urlparse
 os.environ["PYTHONPATH"] = os.path.dirname(os.path.abspath(__file__))
 import agency_orchestrator
 import character_creator
+from eromify_mcp import EromifyMCPClient, EromifyMCPError
 
 # --- Page Configuration ---
 try:
@@ -37,6 +38,10 @@ st.set_page_config(
 DEFAULT_LM_STUDIO_URL = os.getenv(
     "LM_STUDIO_URL",
     "http://169.254.65.222:1234/v1",
+).rstrip("/")
+DEFAULT_EROMIFY_MCP_URL = os.getenv(
+    "EROMIFY_MCP_URL",
+    "https://api.eromify.com/mcp",
 ).rstrip("/")
 
 
@@ -160,6 +165,61 @@ def render_service_controls(lm_url, lm_model, comfy_status):
                 ok, message = start_local_service("comfyui")
                 (st.success if ok else st.error)(message)
                 st.rerun()
+
+        with st.expander("Eromify MCP", expanded=False):
+            eromify_url = st.text_input(
+                "MCP server URL",
+                value=st.session_state.get("eromify_mcp_url", DEFAULT_EROMIFY_MCP_URL),
+                key="eromify_mcp_url",
+            )
+            eromify_token = st.text_input(
+                "Access token",
+                value=os.getenv("EROMIFY_MCP_TOKEN", ""),
+                type="password",
+                key="eromify_mcp_token",
+                help="Use Streamlit secrets or EROMIFY_MCP_TOKEN instead of committing a token.",
+            )
+            if st.button("Test Eromify connection", key="test_eromify"):
+                try:
+                    client = EromifyMCPClient(eromify_url, eromify_token, timeout=10)
+                    info = client.initialize()
+                    tools = client.list_tools()
+                    st.session_state["eromify_tools"] = tools
+                    st.success(f"Connected. {len(tools)} tool(s) available.")
+                    st.json(info)
+                except (EromifyMCPError, requests.RequestException, ValueError) as exc:
+                    st.error(f"Eromify MCP connection failed: {exc}")
+            if st.session_state.get("eromify_tools"):
+                st.caption("Available tools")
+                st.write(", ".join(tool.get("name", "unnamed") for tool in st.session_state["eromify_tools"]))
+                tool_names = [
+                    tool.get("name", "")
+                    for tool in st.session_state["eromify_tools"]
+                    if tool.get("name")
+                ]
+                selected_tool = st.selectbox(
+                    "Tool",
+                    tool_names,
+                    key="eromify_selected_tool",
+                )
+                tool_arguments = st.text_area(
+                    "Tool arguments (JSON)",
+                    value="{}",
+                    key="eromify_tool_arguments",
+                )
+                if st.button("Call Eromify tool", key="call_eromify_tool"):
+                    try:
+                        arguments = json.loads(tool_arguments)
+                        if not isinstance(arguments, dict):
+                            raise ValueError("Tool arguments must be a JSON object.")
+                        client = EromifyMCPClient(eromify_url, eromify_token)
+                        client.initialize()
+                        result = client.call_tool(selected_tool, arguments)
+                        st.session_state["eromify_last_result"] = result
+                    except (EromifyMCPError, requests.RequestException, ValueError, json.JSONDecodeError) as exc:
+                        st.error(f"Eromify tool call failed: {exc}")
+                if "eromify_last_result" in st.session_state:
+                    st.json(st.session_state["eromify_last_result"])
 
 
 def get_saved_characters():

@@ -6,6 +6,47 @@
 
 ---
 
+## One-word launcher
+
+The project has an `agency/` data directory, so the launcher lives in
+`bin/agency`. Install it as the one-word `agency` command:
+
+```bash
+mkdir -p "$HOME/.local/bin"
+ln -sf /home/durty/Agency/bin/agency "$HOME/.local/bin/agency"
+export PATH="$HOME/.local/bin:$PATH"
+agency
+```
+
+The launcher checks the virtual environment, LM Studio, and ComfyUI, starts
+ComfyUI when its local installation is available, prevents duplicate
+dashboard instances, and launches Streamlit on `http://localhost:8502`.
+
+Override the LM Studio host or dashboard port when needed:
+
+```bash
+LM_STUDIO_URL=http://169.254.65.222:1234/v1 AGENCY_PORT=8502 agency
+```
+
+---
+
+## Eromify MCP
+
+The dashboard can connect to the Eromify Streamable HTTP MCP server from the
+sidebar. Set the server URL and token through environment variables or enter
+them in the Eromify MCP panel:
+
+```env
+EROMIFY_MCP_URL=https://api.eromify.com/mcp
+EROMIFY_MCP_TOKEN=your_token_here
+```
+
+Use **Test Eromify connection** to initialize the MCP session and discover the
+tools exposed by the server. The dashboard does not assume tool names or
+content policies; it displays the server's advertised tools before any call.
+
+---
+
 ## Table of Contents
 1. [Quick Start](#quick-start)
 2. [System Architecture](#system-architecture)
